@@ -27,6 +27,30 @@ from api_and_recognition_panel import APIAndRecognitionPanel
 from api_config import TEST_CONFIG  # 测试配置 - 提交前记得删除！
 
 
+def create_temp_file(suffix='.png'):
+    """创建可靠的临时文件，兼容 PyInstaller 打包"""
+    try:
+        # 尝试使用系统临时目录
+        temp_dir = tempfile.gettempdir()
+        temp_file = tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=temp_dir)
+        return temp_file.name
+    except Exception as e:
+        # 如果失败，尝试使用当前工作目录
+        try:
+            temp_file = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+            return temp_file.name
+        except Exception:
+            # 最后的备用方案：使用固定临时文件名
+            import time
+            temp_name = f"temp_image_{int(time.time() * 1000)}{suffix}"
+            if hasattr(sys, '_MEIPASS'):
+                # PyInstaller 打包模式
+                temp_path = os.path.join(sys._MEIPASS, temp_name)
+            else:
+                temp_path = temp_name
+            return temp_path
+
+
 class FormulaRecognizer(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -149,8 +173,7 @@ class FormulaRecognizer(QMainWindow):
             image = ImageGrab.grabclipboard()
             
             if image is not None:
-                with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
-                    temp_path = tmp_file.name
+                temp_path = create_temp_file('.png')
                 image.save(temp_path, 'PNG')
                 self.selected_image_path = temp_path
                 self.image_handler.display_original_image(temp_path, self.ui.left_panel)
@@ -245,9 +268,7 @@ class FormulaRecognizer(QMainWindow):
     def process_new_screenshot(self, image):
         """处理新的截图"""
         try:
-            import tempfile
-            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
-                temp_path = tmp_file.name
+            temp_path = create_temp_file('.png')
             image.save(temp_path, 'PNG')
             self.selected_image_path = temp_path
             self.image_handler.display_original_image(temp_path, self.ui.left_panel)
@@ -428,14 +449,9 @@ class FormulaRecognizer(QMainWindow):
                 self.ui.right_panel.clear_result_text()
                 self.ui.right_panel.show_success_result(result)
                 
-                # 在下方区域显示识别结果
-                if "res" in result and "latex" in result["res"]:
-                    latex_formula = result["res"]["latex"]
-                    self.image_handler.display_result_visualization(latex_formula, self.ui.left_panel)
-                    
-                    # 提取置信度并设置
-                    confidence = 0.0
-                    # 检查所有可能的置信度字段，包括SimpleTex API的实际字段名
+                # 提取置信度并设置
+                confidence = 0.0
+                if "res" in result:
                     res_data = result["res"]
                     if "conf" in res_data:  # SimpleTex API 使用 conf 字段
                         confidence = float(res_data["conf"])
@@ -449,16 +465,25 @@ class FormulaRecognizer(QMainWindow):
                         confidence = float(res_data["accuracy"])
                     # 确保置信度在0-1范围内
                     confidence = max(0.0, min(1.0, confidence))
-                    
-                    # 设置置信度显示
-                    self.ui.right_panel.set_confidence(confidence)
+                
+                # 设置置信度显示
+                self.ui.right_panel.set_confidence(confidence)
+                
+                # 在下方区域显示识别结果
+                if "res" in result and "latex" in result["res"]:
+                    latex_formula = result["res"]["latex"]
+                    print(f"DEBUG: Calling display_result_visualization with formula: {latex_formula}")
+                    self.image_handler.display_result_visualization(latex_formula, self.ui.left_panel)
+                    print("DEBUG: display_result_visualization call completed")
                     
                     # 自动复制到剪贴板
                     pyperclip.copy(latex_formula)
-                    
-                    # 增加成功计数
-                    self.success_count += 1
-                    self.ui.right_panel.update_record_count(self.success_count, self.fail_count)
+                else:
+                    print(f"DEBUG: API result format unexpected. Full result: {result}")
+                
+                # 增加成功计数（无论是否有latex字段，只要API调用成功就算成功）
+                self.success_count += 1
+                self.ui.right_panel.update_record_count(self.success_count, self.fail_count)
 
         except Exception as e:
             self.ui.right_panel.clear_result_text()
@@ -474,6 +499,11 @@ def main():
     
     try:
         app = QApplication(sys.argv)
+        # 设置全局字体以支持中文显示
+        from PyQt6.QtGui import QFont
+        font = QFont("Microsoft YaHei", 9)
+        app.setFont(font)
+        
         window = FormulaRecognizer()
         window.show()
         sys.exit(app.exec())
