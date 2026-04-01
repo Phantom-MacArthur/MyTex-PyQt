@@ -24,7 +24,7 @@ class ResultVisualizationPanel(QWidget):
         result_vis_layout.setContentsMargins(5, 5, 5, 5)
         
         # 使用 QLabel 显示结果
-        self.result_label = QLabel("等待识别结果...")
+        self.result_label = QLabel("")
         self.result_label.setFont(QFont("Microsoft YaHei", 12))
         self.result_label.setStyleSheet("background-color: white; color: black; padding: 10px;")
         self.result_label.setWordWrap(True)

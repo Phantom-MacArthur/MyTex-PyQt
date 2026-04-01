@@ -132,8 +132,7 @@ class FormulaRecognizer(QMainWindow):
             
             # 设置窗口大小为刚好包含图片识别框，添加少量边距
             window_width = max(buttons_width + 40, 300)  # 最小宽度300
-            window_height = buttons_height + 80  # 添加标题栏和边距
-            
+            window_height = buttons_height + 60  # 减少边距，更紧凑
             self.resize(window_width, window_height)
             self.adjustSize()
             

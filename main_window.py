@@ -22,9 +22,15 @@ class MainWindow(QWidget):
         self.left_panel = ImageDisplayPanel()
         self.right_panel = APIAndRecognitionPanel()
         
-        # 设置尺寸策略：左部Expanding（填充可用空间），右部主导高度
+        # 固定右侧宽度，左侧设置相同宽度
+        right_width = 300
+        self.right_panel.setFixedWidth(right_width)
+        self.left_panel.setFixedWidth(right_width)
+        self.left_panel.setMinimumWidth(right_width)
+        
+        # 设置尺寸策略
         left_policy = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
-        right_policy = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        right_policy = QSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
         
         self.left_panel.setSizePolicy(left_policy)
         self.right_panel.setSizePolicy(right_policy)
@@ -35,9 +41,7 @@ class MainWindow(QWidget):
         # 添加右侧面板
         main_layout.addWidget(self.right_panel)
         
-        # 设置拉伸比例
-        main_layout.setStretch(0, 8)
-        main_layout.setStretch(1, 10)
+        # 移除拉伸比例（因为右侧固定宽度）
         
         # 主窗口高度由内容决定
         main_policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
