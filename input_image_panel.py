@@ -2,6 +2,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QGroupBox, QGraphicsView, QGraphicsScene, QSizePolicy  # 添加QSizePolicy导入
 )
 from PyQt6.QtGui import QFont
+from PyQt6.QtCore import Qt  # 添加Qt导入
 
 
 class InputImagePanel(QWidget):  
@@ -29,8 +30,11 @@ class InputImagePanel(QWidget):
         self.original_scene = QGraphicsScene()
         self.original_view.setScene(self.original_scene)
         self.original_view.setStyleSheet("background-color: white;")
-        # 设置为Preferred策略，让内容决定高度，但设置最小高度避免为0
-        self.original_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        # 禁用滚动条，只显示等比例缩放的图片
+        self.original_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.original_view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # 设置为Expanding策略，让内容决定高度，但设置最小高度避免为0
+        self.original_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.original_view.setMinimumHeight(100)  # 设置最小高度
         original_layout.addWidget(self.original_view)
         

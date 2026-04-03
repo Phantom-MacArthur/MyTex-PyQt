@@ -22,6 +22,9 @@ class APIConfigPanel(QGroupBox):
         content_font = QFont("SimSun", 9)
         self.setFont(title_font)
         
+        # 显式设置QGroupBox的边距，上边距为10像素
+        self.setContentsMargins(0, 10, 0, 0)
+        
         config_layout = QVBoxLayout()
         self.setLayout(config_layout)
         

@@ -13,7 +13,7 @@ class ImageDisplayPanel(QWidget):  # 改回QWidget，无外侧边框
     def setup_ui(self):
         """设置左侧面板 - 高度与右部完全一致"""
         # 设置尺寸策略 - 改为Preferred与右部一致
-        policy = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        policy = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Ignored)
         self.setSizePolicy(policy)
         
         left_layout = QVBoxLayout()
@@ -30,9 +30,9 @@ class ImageDisplayPanel(QWidget):  # 改回QWidget，无外侧边框
         self.result_panel = ResultVisualizationPanel()
         left_layout.addWidget(self.result_panel)
         
-        # 恢复拉伸比例：两个面板各占一半高度
-        left_layout.setStretch(0, 1)
-        left_layout.setStretch(1, 1)
+        # 设置拉伸比例：输入图片和识别结果高度1:1
+        left_layout.setStretch(0, 1)  # 输入图片面板占1份
+        left_layout.setStretch(1, 1)  # 识别结果面板占1份
 
     def display_original_image(self, image_path):
         """在上方区域显示原图"""

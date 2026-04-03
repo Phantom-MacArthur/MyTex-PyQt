@@ -1,19 +1,26 @@
 import os
 import sys
 import tempfile
+import logging  # 添加logging导入
+
+# 配置日志
+logging.basicConfig(level=logging.DEBUG)
+
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QMessageBox, QFileDialog, QWidget, QHBoxLayout,
-    QPushButton
+    QPushButton, QSizePolicy
 )
 from PyQt6.QtGui import QShortcut, QKeySequence
 from PyQt6.QtCore import QTimer
 import pyperclip
 
+# 尝试导入 pynput 库，用于触发系统快捷键
 try:
-    from pynput.keyboard import Controller, Key
+    from pynput.keyboard import Key, Controller
 except ImportError:
-    Controller = None
+    # 如果没有安装 pynput，则设置为 None，稍后会提示用户安装
     Key = None
+    Controller = None
 
 # 禁用Python字节码缓存
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
@@ -54,9 +61,10 @@ def create_temp_file(suffix='.png'):
 class FormulaRecognizer(QMainWindow):
     def __init__(self):
         super().__init__()
-        # 设置窗口标题和初始大小 - 更小的默认高度
+        # 设置窗口标题和初始大小 - 修改为宽600高500
         self.setWindowTitle("公式识别软件")
-        self.resize(800, 400)  # 减小默认高度到400px
+        self.resize(600, 500)  # 宽度600px，高度500px
+        self.setMinimumSize(600, 500)
         
         # 创建中心部件
         central_widget = MainWindow()
@@ -68,19 +76,19 @@ class FormulaRecognizer(QMainWindow):
         self.ui = central_widget
         
         # 连接信号
-        self.ui.left_panel.input_panel.original_view  # 确保左侧面板可用
-        self.ui.right_panel.select_image_requested.connect(self.select_image)
-        self.ui.right_panel.take_screenshot_requested.connect(self.take_screenshot)
-        self.ui.right_panel.retry_recognition_requested.connect(self.retry_recognition)
-        self.ui.right_panel.screenshot_shortcut_changed.connect(self.on_screenshot_shortcut_changed)
-        self.ui.right_panel.compact_mode_toggled.connect(self.toggle_compact_mode)
+        self.ui.right_panel.input_panel.original_view  # 确保右侧面板（图片显示）可用
+        self.ui.left_panel.select_image_requested.connect(self.select_image)
+        self.ui.left_panel.take_screenshot_requested.connect(self.take_screenshot)
+        self.ui.left_panel.retry_recognition_requested.connect(self.retry_recognition)
+        self.ui.left_panel.screenshot_shortcut_changed.connect(self.on_screenshot_shortcut_changed)
+        self.ui.left_panel.compact_mode_toggled.connect(self.toggle_compact_mode)
         
         # 状态变量
         self.selected_image_path = None
         self.is_waiting_for_screenshot = False
         self.success_count = 0
         self.fail_count = 0
-        self.ui.right_panel.update_record_count(self.success_count, self.fail_count)
+        self.ui.left_panel.update_record_count(self.success_count, self.fail_count)
         self.is_compact_mode = False
         self.normal_window_size = self.size()  # 保存初始正常窗口大小
         
@@ -90,61 +98,92 @@ class FormulaRecognizer(QMainWindow):
         
         # 加载测试配置（仅用于开发调试）
         if TEST_CONFIG.app_id and TEST_CONFIG.app_secret:
-            self.ui.right_panel.set_app_config(TEST_CONFIG.app_id, TEST_CONFIG.app_secret)
+            self.ui.left_panel.set_app_config(TEST_CONFIG.app_id, TEST_CONFIG.app_secret)
         
         # 定时器用于检测超时
         self.timeout_timer = None
         
-    def _set_test_config(self):
-        """设置测试配置 - 提交前记得删除！"""
-        if TEST_CONFIG.app_id and TEST_CONFIG.app_secret:
-            self.ui.right_panel.set_app_config(TEST_CONFIG.app_id, TEST_CONFIG.app_secret)
-            if TEST_CONFIG.endpoint_choice == "turbo":
-                self.ui.right_panel.turbo_radio.setChecked(True)
-            else:
-                self.ui.right_panel.standard_radio.setChecked(True)
-        
     def on_screenshot_shortcut_changed(self, shortcut):
         """截图快捷键变化处理"""
-        self.current_screenshot_method = shortcut
+        pass  # 暂时留空
         
     def toggle_compact_mode(self, checked):
         """切换精简模式 - 只显示图片识别框"""
         self.is_compact_mode = checked
         if self.is_compact_mode:
-            # 保存当前正常窗口大小
-            self.normal_window_size = self.size()
+            # 保存当前正常窗口几何尺寸（必须使用geometry()全量保存）
+            self.normal_window_geometry = self.geometry()
             
-            self.ui.right_panel.compact_mode_btn.setText("完整模式")
-            # 隐藏左侧面板和API配置区域，只显示图片识别框
-            self.ui.left_panel.hide()
-            self.ui.right_panel.config_panel.hide()
-            self.ui.right_panel.latex_panel.hide()
+            # 保存右侧面板的原始尺寸策略
+            self.normal_left_size_policy = self.ui.right_panel.sizePolicy()
             
-            # 强制重新计算图片识别框的尺寸
-            self.ui.right_panel.buttons_panel.setVisible(True)
-            self.ui.right_panel.buttons_panel.adjustSize()
+            self.ui.left_panel.compact_mode_btn.setText("完整模式")
             
-            # 获取图片识别框的实际尺寸
-            buttons_rect = self.ui.right_panel.buttons_panel.rect()
-            buttons_width = self.ui.right_panel.buttons_panel.sizeHint().width()
-            buttons_height = self.ui.right_panel.buttons_panel.sizeHint().height()
+            # 隐藏右侧面板，并临时将其水平尺寸策略设为Ignored
+            self.ui.right_panel.hide()
+            left_policy_ignored = QSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+            self.ui.right_panel.setSizePolicy(left_policy_ignored)
             
-            # 设置窗口大小为刚好包含图片识别框，添加少量边距
-            window_width = max(buttons_width + 40, 300)  # 最小宽度300
-            window_height = buttons_height + 60  # 减少边距，更紧凑
+            # 隐藏左侧面板中的非目标组件，只保留图片识别按钮面板
+            self.ui.left_panel.config_panel.hide()
+            self.ui.left_panel.latex_panel.hide()
+            
+            # 确保图片识别按钮面板可见
+            self.ui.left_panel.buttons_panel.setVisible(True)
+            self.ui.left_panel.buttons_panel.adjustSize()
+            
+            # 获取图片识别框的实际尺寸（包括标题栏）
+            buttons_size = self.ui.left_panel.buttons_panel.sizeHint()
+            buttons_width = buttons_size.width()
+            buttons_height = buttons_size.height()
+            
+            # 使用主窗口固定边距(10,10,10,10)计算精简模式窗口大小
+            # 主窗口边距固定为10px，严禁在模式切换时动态修改
+            window_width = buttons_width + 20  # 左右边距各10px
+            window_height = buttons_height + 20  # 上下边距各10px
             self.resize(window_width, window_height)
             self.adjustSize()
             
+            # 设置窗口为固定大小
+            self.setFixedSize(window_width, window_height)
+            
+            # 添加强制布局重算
+            self.ui.layout().update()
+            
         else:
-            self.ui.right_panel.compact_mode_btn.setText("精简模式")
+            self.ui.left_panel.compact_mode_btn.setText("精简模式")
+            
+            # 恢复右侧面板的原始尺寸策略
+            self.ui.right_panel.setSizePolicy(self.normal_left_size_policy)
             # 显示所有面板
-            self.ui.left_panel.show()
-            self.ui.right_panel.config_panel.show()
-            self.ui.right_panel.latex_panel.show()
-            # 恢复之前保存的窗口大小
-            self.resize(self.normal_window_size)
-        
+            self.ui.right_panel.show()
+            self.ui.left_panel.config_panel.show()
+            self.ui.left_panel.latex_panel.show()
+            
+            # 强制左侧面板及其内部布局重新计算
+            self.ui.left_panel.layout().update()
+            self.ui.left_panel.adjustSize()
+            
+            # 先清除固定尺寸限制（符合规范顺序要求）
+            self.setMinimumSize(0, 0)
+            self.setMaximumSize(16777215, 16777215)
+            
+            # 再恢复之前保存的窗口几何尺寸
+            self.setGeometry(self.normal_window_geometry)
+            
+            # 重新设置主布局参数
+            main_layout = self.ui.layout()
+            main_layout.setContentsMargins(10, 10, 10, 10)
+            main_layout.setSpacing(10)
+            main_layout.setStretch(0, 0)
+            main_layout.setStretch(1, 1)
+            
+            # 最后设置最小尺寸限制（符合规范：清除限制 -> 恢复几何 -> 设置新限制）
+            self.setMinimumSize(600, 500)
+            
+            # 添加强制布局重算
+            self.ui.layout().update()
+            
     def select_image(self):
         """选择图片文件"""
         file_path, _ = QFileDialog.getOpenFileName(
@@ -157,9 +196,9 @@ class FormulaRecognizer(QMainWindow):
         if file_path:
             self.selected_image_path = file_path
             # 显示原图在上方区域
-            self.image_handler.display_original_image(file_path, self.ui.left_panel)
-            self.ui.right_panel.clear_result_text()
-            self.ui.right_panel.show_processing_message()
+            self.image_handler.display_original_image(file_path, self.ui.right_panel)
+            self.ui.left_panel.clear_result_text()
+            self.ui.left_panel.show_processing_message()
             
             # 自动执行识别
             self.auto_recognize_formula()
@@ -175,9 +214,9 @@ class FormulaRecognizer(QMainWindow):
                 temp_path = create_temp_file('.png')
                 image.save(temp_path, 'PNG')
                 self.selected_image_path = temp_path
-                self.image_handler.display_original_image(temp_path, self.ui.left_panel)
-                self.ui.right_panel.clear_result_text()
-                self.ui.right_panel.show_processing_message()
+                self.image_handler.display_original_image(temp_path, self.ui.right_panel)
+                self.ui.left_panel.clear_result_text()
+                self.ui.left_panel.show_processing_message()
                 self.auto_recognize_formula()
             else:
                 # 根据项目规范，剪贴板无图片时静默返回，不弹窗警告
@@ -261,8 +300,8 @@ class FormulaRecognizer(QMainWindow):
             # 只在真正出错时才显示错误
             self.cleanup_clipboard_monitoring()
             self.fail_count += 1
-            self.ui.right_panel.update_record_count(self.success_count, self.fail_count)
-            self.ui.right_panel.show_error("截图处理失败", str(e))
+            self.ui.left_panel.update_record_count(self.success_count, self.fail_count)
+            self.ui.left_panel.show_error("截图处理失败", str(e))
             
     def process_new_screenshot(self, image):
         """处理新的截图"""
@@ -270,9 +309,9 @@ class FormulaRecognizer(QMainWindow):
             temp_path = create_temp_file('.png')
             image.save(temp_path, 'PNG')
             self.selected_image_path = temp_path
-            self.image_handler.display_original_image(temp_path, self.ui.left_panel)
-            self.ui.right_panel.clear_result_text()
-            self.ui.right_panel.show_processing_message()
+            self.image_handler.display_original_image(temp_path, self.ui.right_panel)
+            self.ui.left_panel.clear_result_text()
+            self.ui.left_panel.show_processing_message()
             self.auto_recognize_formula()
             
             # 更新基准状态为当前图片
@@ -280,7 +319,7 @@ class FormulaRecognizer(QMainWindow):
             self.clipboard_baseline_path = temp_path
             
         except Exception as e:
-            self.ui.right_panel.show_error("处理截图失败", str(e))
+            self.ui.left_panel.show_error("处理截图失败", str(e))
             
     def cleanup_clipboard_monitoring(self):
         """清理剪贴板监听资源"""
@@ -301,7 +340,7 @@ class FormulaRecognizer(QMainWindow):
         
     def take_screenshot(self):
         """截图功能 - 触发系统区域截图快捷键"""
-        screenshot_method = self.ui.right_panel.get_current_screenshot_shortcut()
+        screenshot_method = self.ui.left_panel.get_current_screenshot_shortcut()
         
         if screenshot_method == "printscreen":
             # 对于PrintScreen，触发Win+Shift+S（Windows区域截图）
@@ -314,6 +353,13 @@ class FormulaRecognizer(QMainWindow):
             
     def trigger_win_shift_s(self):
         """触发 Windows 区域截图快捷键 Win+Shift+S"""
+        if Controller is None or Key is None:
+            # 如果没有 pynput，提示用户手动截图
+            self.is_waiting_for_screenshot = True
+            QMessageBox.information(self, "区域截图", "请按 Win+Shift+S 进行区域截图")
+            QTimer.singleShot(100, self.check_clipboard_for_screenshot)
+            return
+            
         try:
             keyboard = Controller()
             # 按下 Win+Shift+S
@@ -327,16 +373,16 @@ class FormulaRecognizer(QMainWindow):
             # 启动剪贴板监听
             self.start_clipboard_monitoring()
             
-        except ImportError:
-            # 如果没有 pynput，提示用户手动截图
-            self.is_waiting_for_screenshot = True
-            QMessageBox.information(self, "区域截图", "请按 Win+Shift+S 进行区域截图")
-            QTimer.singleShot(100, self.check_clipboard_for_screenshot)
         except Exception as e:
             QMessageBox.critical(self, "错误", f"触发区域截图失败：{str(e)}")
             
     def trigger_ctrl_c_keys(self):
         """触发 Ctrl+C 组合键 - 仍然使用剪贴板方式"""
+        if Controller is None or Key is None:
+            # 如果没有 pynput，回退到原来的逻辑
+            self.fallback_ctrl_c_logic()
+            return
+            
         try:
             keyboard = Controller()
             keyboard.press(Key.ctrl)
@@ -345,11 +391,30 @@ class FormulaRecognizer(QMainWindow):
             keyboard.release(Key.ctrl)
             # 对于Ctrl+C，仍然需要监听剪贴板
             self.paste_image_from_clipboard()
-        except ImportError:
-            # 如果没有 pynput，回退到原来的逻辑
-            self.fallback_ctrl_c_logic()
         except Exception as e:
             QMessageBox.critical(self, "错误", f"触发 Ctrl+C 失败：{str(e)}")
+            
+    def fallback_ctrl_c_logic(self):
+        """当没有 pynput 库时的 Ctrl+C 回退逻辑 - 直接从剪贴板获取图片"""
+        from PIL import ImageGrab
+        
+        try:
+            image = ImageGrab.grabclipboard()
+            
+            if image is not None:
+                temp_path = create_temp_file('.png')
+                image.save(temp_path, 'PNG')
+                self.selected_image_path = temp_path
+                self.image_handler.display_original_image(temp_path, self.ui.right_panel)
+                self.ui.left_panel.clear_result_text()
+                self.ui.left_panel.show_processing_message()
+                self.auto_recognize_formula()
+            else:
+                # 对于 Ctrl+C 方式，如果没有图片，提示用户
+                QMessageBox.information(self, "提示", "剪贴板中没有图片，请先复制一张图片。")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"从剪贴板读取图片失败: {str(e)}")
             
     def trigger_custom_shortcut(self, shortcut_str):
         """触发自定义快捷键"""
@@ -405,8 +470,8 @@ class FormulaRecognizer(QMainWindow):
         self.is_waiting_for_screenshot = False
         self.timeout_timer = None
         self.fail_count += 1
-        self.ui.right_panel.update_record_count(self.success_count, self.fail_count)
-        self.ui.right_panel.show_error("截图超时", "5秒内未检测到剪贴板中的图片")
+        self.ui.left_panel.update_record_count(self.success_count, self.fail_count)
+        self.ui.left_panel.show_error("截图超时", "5秒内未检测到剪贴板中的图片")
         
     def retry_recognition(self):
         """重试识别功能 - 永远激活，无提示"""
@@ -414,8 +479,8 @@ class FormulaRecognizer(QMainWindow):
             # 没有图片时直接返回，不显示任何提示
             return
             
-        self.ui.right_panel.clear_result_text()
-        self.ui.right_panel.show_processing_message()
+        self.ui.left_panel.clear_result_text()
+        self.ui.left_panel.show_processing_message()
         self.auto_recognize_formula()
 
     def auto_recognize_formula(self):
@@ -424,29 +489,29 @@ class FormulaRecognizer(QMainWindow):
             return
 
         # 获取API配置
-        app_id = self.ui.right_panel.get_app_id()
-        app_secret = self.ui.right_panel.get_app_secret()
+        app_id = self.ui.left_panel.get_app_id()
+        app_secret = self.ui.left_panel.get_app_secret()
 
         if not app_id or not app_secret:
-            self.ui.right_panel.clear_result_text()
-            self.ui.right_panel.show_config_prompt()
+            self.ui.left_panel.clear_result_text()
+            self.ui.left_panel.show_config_prompt()
             return
 
         try:
             # 调用API
             result = self.api_client.recognize_formula_api(
-                self.selected_image_path, app_id, app_secret, self.ui.right_panel.get_endpoint_choice()
+                self.selected_image_path, app_id, app_secret, self.ui.left_panel.get_endpoint_choice()
             )
 
             if "error" in result:
-                self.ui.right_panel.clear_result_text()
-                self.ui.right_panel.show_error(result['error'], result.get('details', ''))
+                self.ui.left_panel.clear_result_text()
+                self.ui.left_panel.show_error(result['error'], result.get('details', ''))
                 self.fail_count += 1
-                self.ui.right_panel.update_record_count(self.success_count, self.fail_count)
+                self.ui.left_panel.update_record_count(self.success_count, self.fail_count)
             else:
                 # 成功识别，显示结果
-                self.ui.right_panel.clear_result_text()
-                self.ui.right_panel.show_success_result(result)
+                self.ui.left_panel.clear_result_text()
+                self.ui.left_panel.show_success_result(result)
                 
                 # 提取置信度并设置
                 confidence = 0.0
@@ -466,13 +531,13 @@ class FormulaRecognizer(QMainWindow):
                     confidence = max(0.0, min(1.0, confidence))
                 
                 # 设置置信度显示
-                self.ui.right_panel.set_confidence(confidence)
+                self.ui.left_panel.set_confidence(confidence)
                 
                 # 在下方区域显示识别结果
                 if "res" in result and "latex" in result["res"]:
                     latex_formula = result["res"]["latex"]
                     print(f"DEBUG: Calling display_result_visualization with formula: {latex_formula}")
-                    self.image_handler.display_result_visualization(latex_formula, self.ui.left_panel)
+                    self.image_handler.display_result_visualization(latex_formula, self.ui.right_panel)
                     print("DEBUG: display_result_visualization call completed")
                     
                     # 自动复制到剪贴板
@@ -482,13 +547,13 @@ class FormulaRecognizer(QMainWindow):
                 
                 # 增加成功计数（无论是否有latex字段，只要API调用成功就算成功）
                 self.success_count += 1
-                self.ui.right_panel.update_record_count(self.success_count, self.fail_count)
+                self.ui.left_panel.update_record_count(self.success_count, self.fail_count)
 
         except Exception as e:
-            self.ui.right_panel.clear_result_text()
-            self.ui.right_panel.show_error(f"识别过程中发生错误: {str(e)}", "")
+            self.ui.left_panel.clear_result_text()
+            self.ui.left_panel.show_error(f"识别过程中发生错误: {str(e)}", "")
             self.fail_count += 1
-            self.ui.right_panel.update_record_count(self.success_count, self.fail_count)
+            self.ui.left_panel.update_record_count(self.success_count, self.fail_count)
 
 
 def main():

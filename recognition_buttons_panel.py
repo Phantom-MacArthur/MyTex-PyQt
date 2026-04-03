@@ -25,6 +25,7 @@ class RecognitionButtonsPanel(QGroupBox):
         
         # 主布局 - 垂直布局包含按钮行和记录行
         main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(5, 5, 5, 5)  # 设置固定5px边距
         self.setLayout(main_layout)
         
         # 按钮行 - 4个功能按钮居中，左右边距相同

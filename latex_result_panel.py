@@ -27,14 +27,16 @@ class LatexResultPanel(QGroupBox):
         result_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.setLayout(result_layout)
 
-        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        # 设置LaTeX面板尺寸策略 - 允许垂直扩展
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
 
         self.result_text = QTextEdit()
         self.result_text.setFont(content_font)
         self.result_text.setReadOnly(True)
         self.result_text.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        # 文本区域垂直策略设为Expanding，允许随窗口高度增加而扩展
         self.result_text.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
         result_layout.addWidget(self.result_text)
 
