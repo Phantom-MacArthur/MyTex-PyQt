@@ -62,8 +62,8 @@ class ScreenshotShortcutDialog(QDialog):
         shortcut_type = self.shortcut_combo.currentText()
         if shortcut_type == "PrintScreen":
             return "printscreen"
-        elif shortcut_type == "Ctrl+C":
-            return "ctrl+c"
+        elif shortcut_type == "Alt+C":
+            return "alt+c"
         else:
             custom_text = self.custom_shortcut_input.get_recorded_sequence()
             return custom_text if custom_text else "printscreen"

@@ -9,10 +9,17 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
+# 尝试导入 latex2mathml 库用于 LaTeX 到 MathML 转换
+try:
+    import latex2mathml.converter
+    LATEX2MATHML_AVAILABLE = True
+except ImportError:
+    LATEX2MATHML_AVAILABLE = False
+
 
 class LatexResultPanel(QGroupBox):
     def __init__(self, parent=None):
-        super().__init__("LaTeX公式", parent)
+        super().__init__("MathML公式", parent)  # 修改标题为"MathML公式"
         self.setup_ui()
 
     def setup_ui(self):
@@ -67,8 +74,19 @@ class LatexResultPanel(QGroupBox):
         current_text = self.result_text.toPlainText()
         if "res" in result and "latex" in result["res"]:
             latex_formula = result["res"]["latex"]
-
-            success_text = f"{latex_formula}\n\n"
+            
+            # 默认转换为MathML格式显示
+            if LATEX2MATHML_AVAILABLE:
+                try:
+                    mathml_formula = latex2mathml.converter.convert(latex_formula)
+                    success_text = f"{mathml_formula}\n\n"
+                except Exception as e:
+                    # 如果转换失败，回退到LaTeX
+                    print(f"MathML转换失败: {e}，回退到LaTeX")
+                    success_text = f"{latex_formula}\n\n"
+            else:
+                # 如果没有latex2mathml库，只显示LaTeX
+                success_text = f"{latex_formula}\n\n"
             self.result_text.setPlainText(current_text + success_text)
         else:
             import json

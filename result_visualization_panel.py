@@ -19,7 +19,7 @@ class ResultVisualizationPanel(QWidget):
         self.setLayout(layout)
         
         # 识别结果区域
-        result_vis_group = QGroupBox("识别结果")
+        result_vis_group = QGroupBox("LaTeX公式")  # 修改标题为"LaTeX公式"
         result_vis_group.setFont(title_font)
         result_vis_layout = QVBoxLayout()
         result_vis_layout.setContentsMargins(5, 5, 5, 5)

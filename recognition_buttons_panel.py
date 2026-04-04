@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import (
-    QGroupBox, QHBoxLayout, QPushButton, QLabel, QVBoxLayout, QSizePolicy
+    QGroupBox, QHBoxLayout, QPushButton, QLabel, QVBoxLayout, QSizePolicy, QDialog
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -12,6 +12,8 @@ class RecognitionButtonsPanel(QGroupBox):
     take_screenshot_requested = pyqtSignal()
     retry_recognition_requested = pyqtSignal()
     compact_mode_toggled = pyqtSignal(bool)
+    always_on_top_toggled = pyqtSignal(bool)  # 新增置顶切换信号
+    screenshot_settings_requested = pyqtSignal()  # 新增截图设置信号
     
     def __init__(self, parent=None):
         super().__init__("图片识别", parent)
@@ -58,7 +60,7 @@ class RecognitionButtonsPanel(QGroupBox):
         self.shortcut_btn = QPushButton("截图设置")
         self.shortcut_btn.setFont(content_font)
         self.shortcut_btn.setFixedSize(70, 30)
-        self.shortcut_btn.clicked.connect(self.show_screenshot_shortcut_dialog)
+        self.shortcut_btn.clicked.connect(self.screenshot_settings_requested)  # 修复：直接连接到信号，而不是emit方法
         button_layout.addWidget(self.shortcut_btn)
         
         # 添加右侧弹性空间实现居中
@@ -66,10 +68,10 @@ class RecognitionButtonsPanel(QGroupBox):
         
         main_layout.addLayout(button_layout)
         
-        # 状态行 - 包含精简模式按钮、成功计数器和置信度
+        # 状态行 - 包含精简模式按钮、置顶按钮、成功计数器和置信度
         record_layout = QHBoxLayout()
         record_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        record_layout.setSpacing(8)
+        record_layout.setSpacing(2)  # 改为2px，与上一行按钮间距相同
         record_layout.setContentsMargins(0, 0, 0, 0)
         
         # 精简模式按钮放在状态行最左侧
@@ -80,7 +82,16 @@ class RecognitionButtonsPanel(QGroupBox):
         self.compact_mode_btn.clicked.connect(self.on_compact_mode_toggled)
         record_layout.addWidget(self.compact_mode_btn)
         
-        self.record_label = QLabel("成功: ")  # 预留一位空格
+        # 置顶按钮 - 调整为与其他按钮相同的大小
+        self.always_on_top_btn = QPushButton("置顶")
+        self.always_on_top_btn.setFont(content_font)
+        self.always_on_top_btn.setCheckable(True)
+        self.always_on_top_btn.setFixedSize(70, 30)  # 改为70x30，与其他按钮一致
+        self.always_on_top_btn.setChecked(True)  # 默认置顶
+        self.always_on_top_btn.clicked.connect(self.on_always_on_top_toggled)
+        record_layout.addWidget(self.always_on_top_btn)
+        
+        self.record_label = QLabel("成功: 0")  # 只显示成功计数，初始为0
         self.record_label.setFont(content_font)
         self.record_label.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred)  # 自适应宽度
         record_layout.addWidget(self.record_label)
@@ -100,20 +111,27 @@ class RecognitionButtonsPanel(QGroupBox):
         
         main_layout.addLayout(record_layout)
         
-    def show_screenshot_shortcut_dialog(self):
-        """显示截图快捷键设置对话框 - 需要通过父窗口实现"""
-        # 这个方法应该由 RightPanel 实现，这里发出信号
-        pass
-        
     def on_compact_mode_toggled(self, checked):
-        """精简模式切换信号"""
+        """精简模式切换处理"""
         self.compact_mode_toggled.emit(checked)
         
+    def on_always_on_top_toggled(self, checked):
+        """置顶切换处理"""
+        self.always_on_top_toggled.emit(checked)
+        
     def update_record_count(self, success_count, fail_count):
-        """更新识别记录 - 只显示成功次数，预留一位空格"""
-        # 只显示成功次数，预留一位空格
-        self.record_label.setText(f"成功: {success_count} ")
+        """更新识别记录 - 只显示成功计数"""
+        self.record_label.setText(f"成功: {success_count}")
         
     def set_confidence(self, confidence):
         """设置置信度"""
         self.confidence_bar.set_confidence(confidence)
+        
+    def show_screenshot_shortcut_dialog(self):
+        """这个方法应该由父组件调用，而不是直接连接到按钮"""
+        from screenshot_dialog import ScreenshotShortcutDialog
+        dialog = ScreenshotShortcutDialog(self, self.current_screenshot_shortcut if hasattr(self, 'current_screenshot_shortcut') else "printscreen")
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            new_shortcut = dialog.get_selected_shortcut()
+            self.current_screenshot_shortcut = new_shortcut
+            # 注意：这里可能需要发出信号，但当前没有连接

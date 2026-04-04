@@ -7,12 +7,20 @@ import logging  # 添加logging导入
 logging.basicConfig(level=logging.DEBUG)
 
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QMessageBox, QFileDialog, QWidget, QHBoxLayout,
-    QPushButton, QSizePolicy
+    QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
+    QPushButton, QLabel, QTextEdit, QGroupBox, QFileDialog,
+    QMessageBox, QSizePolicy, QGraphicsView, QGraphicsScene, QCheckBox
 )
-from PyQt6.QtGui import QShortcut, QKeySequence
-from PyQt6.QtCore import QTimer
+from PyQt6.QtGui import QKeySequence, QShortcut  # QShortcut在QtGui中
+from PyQt6.QtCore import Qt, QTimer  # 添加QTimer导入
 import pyperclip
+
+# 尝试导入 latex2mathml 库用于 LaTeX 到 MathML 转换
+try:
+    import latex2mathml.converter
+    LATEX2MATHML_AVAILABLE = True
+except ImportError:
+    LATEX2MATHML_AVAILABLE = False
 
 # 尝试导入 pynput 库，用于触发系统快捷键
 try:
@@ -61,12 +69,19 @@ def create_temp_file(suffix='.png'):
 class FormulaRecognizer(QMainWindow):
     def __init__(self):
         super().__init__()
+        
         # 设置窗口标题和初始大小 - 修改为宽600高500
         self.setWindowTitle("公式识别软件")
         self.resize(600, 500)  # 宽度600px，高度500px
         self.setMinimumSize(600, 500)
         
-        # 创建中心部件
+        # Windows特定：设置应用程序ID以确保任务栏图标正常显示
+        if sys.platform == "win32":
+            import ctypes
+            myappid = 'mytex.formularecognizer.1.0'  # 应用程序ID
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        
+        # 创建中心部件 - 使用标准窗口标志，不包含置顶标志
         central_widget = MainWindow()
         self.setCentralWidget(central_widget)
         
@@ -82,6 +97,7 @@ class FormulaRecognizer(QMainWindow):
         self.ui.left_panel.retry_recognition_requested.connect(self.retry_recognition)
         self.ui.left_panel.screenshot_shortcut_changed.connect(self.on_screenshot_shortcut_changed)
         self.ui.left_panel.compact_mode_toggled.connect(self.toggle_compact_mode)
+        self.ui.left_panel.always_on_top_toggled.connect(self.toggle_always_on_top)
         
         # 状态变量
         self.selected_image_path = None
@@ -89,7 +105,7 @@ class FormulaRecognizer(QMainWindow):
         self.success_count = 0
         self.fail_count = 0
         self.ui.left_panel.update_record_count(self.success_count, self.fail_count)
-        self.is_compact_mode = False
+        self.is_compact_mode = True  # 默认开启精简模式
         self.normal_window_size = self.size()  # 保存初始正常窗口大小
         
         # 绑定快捷键
@@ -103,9 +119,81 @@ class FormulaRecognizer(QMainWindow):
         # 定时器用于检测超时
         self.timeout_timer = None
         
+        # 启动时默认进入精简模式和置顶状态将在 showEvent 中处理
+        
+    def _initialize_default_state(self):
+        """延迟初始化默认状态（精简模式和置顶）"""
+        # 确保窗口已经完全显示
+        if not self.isVisible():
+            return
+            
+        # 先设置置顶状态
+        self.toggle_always_on_top(True)
+        # 再进入精简模式
+        self.is_compact_mode = True
+        self.toggle_compact_mode(True)
+        
+    def showEvent(self, event):
+        """窗口显示事件"""
+        super().showEvent(event)
+            
+        # 确保窗口显示后设置置顶
+        if not hasattr(self, '_default_state_initialized'):
+            self._default_state_initialized = True
+            QTimer.singleShot(300, self._initialize_default_state)
+        
     def on_screenshot_shortcut_changed(self, shortcut):
         """截图快捷键变化处理"""
         pass  # 暂时留空
+        
+    def toggle_always_on_top(self, checked):
+        """切换窗口置顶状态 - 完全使用Windows API"""
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                
+                # 获取窗口句柄并转换为整数
+                hwnd = int(self.winId())
+                
+                # Windows常量
+                HWND_TOPMOST = ctypes.c_int(-1)
+                HWND_NOTOPMOST = ctypes.c_int(-2)
+                SWP_NOMOVE = 0x0002
+                SWP_NOSIZE = 0x0001
+                SWP_NOACTIVATE = 0x0010
+                SWP_ASYNCWINDOWPOS = 0x4000
+                
+                flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS
+                
+                if checked:
+                    result = ctypes.windll.user32.SetWindowPos(
+                        ctypes.c_void_p(hwnd), 
+                        HWND_TOPMOST, 
+                        0, 0, 0, 0, 
+                        flags
+                    )
+                else:
+                    result = ctypes.windll.user32.SetWindowPos(
+                        ctypes.c_void_p(hwnd), 
+                        HWND_NOTOPMOST, 
+                        0, 0, 0, 0, 
+                        flags
+                    )
+                    
+                if not result:
+                    raise ctypes.WinError()
+                    
+            except Exception as e:
+                print(f"Windows API置顶失败: {e}")
+                # 不回退到窗口标志方式，避免任务栏图标消失
+        else:
+            # Windows平台重新设置应用程序ID以保护任务栏图标
+            try:
+                import ctypes
+                myappid = 'mytex.formularecognizer.1.0'
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+            except:
+                pass
         
     def toggle_compact_mode(self, checked):
         """切换精简模式 - 只显示图片识别框"""
@@ -118,6 +206,7 @@ class FormulaRecognizer(QMainWindow):
             self.normal_left_size_policy = self.ui.right_panel.sizePolicy()
             
             self.ui.left_panel.compact_mode_btn.setText("完整模式")
+            self.ui.left_panel.compact_mode_btn.setChecked(True)  # 同步按钮选中状态
             
             # 隐藏右侧面板，并临时将其水平尺寸策略设为Ignored
             self.ui.right_panel.hide()
@@ -144,14 +233,16 @@ class FormulaRecognizer(QMainWindow):
             self.resize(window_width, window_height)
             self.adjustSize()
             
-            # 设置窗口为固定大小
-            self.setFixedSize(window_width, window_height)
+            # 使用最小和最大尺寸限制替代setFixedSize
+            self.setMinimumSize(window_width, window_height)
+            self.setMaximumSize(window_width, window_height)
             
             # 添加强制布局重算
             self.ui.layout().update()
             
         else:
             self.ui.left_panel.compact_mode_btn.setText("精简模式")
+            self.ui.left_panel.compact_mode_btn.setChecked(False)  # 同步按钮选中状态
             
             # 恢复右侧面板的原始尺寸策略
             self.ui.right_panel.setSizePolicy(self.normal_left_size_policy)
@@ -168,7 +259,7 @@ class FormulaRecognizer(QMainWindow):
             self.setMinimumSize(0, 0)
             self.setMaximumSize(16777215, 16777215)
             
-            # 再恢复之前保存的窗口几何尺寸
+            # 恢复之前保存的窗口几何尺寸
             self.setGeometry(self.normal_window_geometry)
             
             # 重新设置主布局参数
@@ -180,6 +271,9 @@ class FormulaRecognizer(QMainWindow):
             
             # 最后设置最小尺寸限制（符合规范：清除限制 -> 恢复几何 -> 设置新限制）
             self.setMinimumSize(600, 500)
+            
+            # 确保窗口正确显示
+            self.show()
             
             # 添加强制布局重算
             self.ui.layout().update()
@@ -226,7 +320,7 @@ class FormulaRecognizer(QMainWindow):
 
     def start_clipboard_monitoring(self):
         """启动剪贴板变化监听 - 立即开始检查"""
-        # 记录当前剪贴板的图片内容（不仅仅是是否有图片）
+        # 记录当前剪贴板的图片内容作为基准（触发截图前绝不清理剪贴板）
         try:
             from PIL import ImageGrab
             current_image = ImageGrab.grabclipboard()
@@ -249,6 +343,43 @@ class FormulaRecognizer(QMainWindow):
         # 立即开始检查（不等待）
         self.check_clipboard_for_changes()
         
+    def _images_are_different(self, current_image, baseline_path):
+        """比较当前图片与基准图片是否不同"""
+        if not baseline_path or not os.path.exists(baseline_path):
+            return True
+            
+        try:
+            # 保存当前图片到临时文件进行比较
+            temp_current = create_temp_file('.png')
+            current_image.save(temp_current, 'PNG')
+            
+            # 比较文件大小
+            current_size = os.path.getsize(temp_current)
+            baseline_size = os.path.getsize(baseline_path)
+            
+            if current_size != baseline_size:
+                # 文件大小不同，肯定是不同图片
+                os.remove(temp_current)
+                return True
+                
+            # 如果文件大小相同，进一步比较内容（读取前几个字节）
+            with open(temp_current, 'rb') as f1, open(baseline_path, 'rb') as f2:
+                current_header = f1.read(1024)
+                baseline_header = f2.read(1024)
+                
+            os.remove(temp_current)
+            
+            return current_header != baseline_header
+            
+        except Exception:
+            # 如果比较失败，保守认为是不同图片
+            if 'temp_current' in locals() and os.path.exists(temp_current):
+                try:
+                    os.remove(temp_current)
+                except:
+                    pass
+            return True
+        
     def check_clipboard_for_changes(self):
         """检查剪贴板是否发生变化 - 改进的比较逻辑"""
         if not self.is_waiting_for_screenshot:
@@ -267,9 +398,11 @@ class FormulaRecognizer(QMainWindow):
                     return
                 else:
                     # 之前有图片，需要比较是否相同
-                    # 简单方案：直接处理（因为区域截图通常会产生新内容）
-                    self.process_new_screenshot(current_image)
-                    return
+                    if self._images_are_different(current_image, self.clipboard_baseline_path):
+                        # 图片不同 -> 新截图
+                        self.process_new_screenshot(current_image)
+                        return
+                    # 图片相同，继续监听
             else:
                 # 当前没有图片
                 if self.clipboard_has_baseline:
@@ -314,6 +447,13 @@ class FormulaRecognizer(QMainWindow):
             self.ui.left_panel.show_processing_message()
             self.auto_recognize_formula()
             
+            # 清理旧的基准文件（如果有）
+            if hasattr(self, 'clipboard_baseline_path') and self.clipboard_baseline_path:
+                try:
+                    os.remove(self.clipboard_baseline_path)
+                except:
+                    pass
+            
             # 更新基准状态为当前图片
             self.clipboard_has_baseline = True
             self.clipboard_baseline_path = temp_path
@@ -345,6 +485,8 @@ class FormulaRecognizer(QMainWindow):
         if screenshot_method == "printscreen":
             # 对于PrintScreen，触发Win+Shift+S（Windows区域截图）
             self.trigger_win_shift_s()
+        elif screenshot_method == "alt+c":
+            self.trigger_alt_c_keys()
         elif screenshot_method == "ctrl+c":
             self.trigger_ctrl_c_keys()
         else:
@@ -375,6 +517,26 @@ class FormulaRecognizer(QMainWindow):
             
         except Exception as e:
             QMessageBox.critical(self, "错误", f"触发区域截图失败：{str(e)}")
+            
+    def trigger_alt_c_keys(self):
+        """触发 Alt+C 组合键"""
+        if Controller is None or Key is None:
+            # 如果没有 pynput，回退到手动提示
+            self.is_waiting_for_screenshot = True
+            QMessageBox.information(self, "区域截图", "请按 Alt+C 进行区域截图")
+            QTimer.singleShot(100, self.check_clipboard_for_screenshot)
+            return
+            
+        try:
+            keyboard = Controller()
+            keyboard.press(Key.alt)
+            keyboard.press('c')
+            keyboard.release('c')
+            keyboard.release(Key.alt)
+            # 启动剪贴板监听
+            self.start_clipboard_monitoring()
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"触发 Alt+C 失败：{str(e)}")
             
     def trigger_ctrl_c_keys(self):
         """触发 Ctrl+C 组合键 - 仍然使用剪贴板方式"""
@@ -536,14 +698,20 @@ class FormulaRecognizer(QMainWindow):
                 # 在下方区域显示识别结果
                 if "res" in result and "latex" in result["res"]:
                     latex_formula = result["res"]["latex"]
-                    print(f"DEBUG: Calling display_result_visualization with formula: {latex_formula}")
                     self.image_handler.display_result_visualization(latex_formula, self.ui.right_panel)
-                    print("DEBUG: display_result_visualization call completed")
                     
-                    # 自动复制到剪贴板
-                    pyperclip.copy(latex_formula)
-                else:
-                    print(f"DEBUG: API result format unexpected. Full result: {result}")
+                    # 默认转换为MathML格式并复制到剪贴板
+                    if LATEX2MATHML_AVAILABLE:
+                        try:
+                            mathml_formula = latex2mathml.converter.convert(latex_formula)
+                            pyperclip.copy(mathml_formula)
+                        except Exception as e:
+                            # 如果转换失败，回退到LaTeX
+                            print(f"MathML转换失败: {e}，回退到LaTeX")
+                            pyperclip.copy(latex_formula)
+                    else:
+                        # 如果没有latex2mathml库，只复制LaTeX
+                        pyperclip.copy(latex_formula)
                 
                 # 增加成功计数（无论是否有latex字段，只要API调用成功就算成功）
                 self.success_count += 1
