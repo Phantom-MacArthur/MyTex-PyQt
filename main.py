@@ -1,10 +1,6 @@
 import os
 import sys
 import tempfile
-import logging  # 添加logging导入
-
-# 配置日志
-logging.basicConfig(level=logging.DEBUG)
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
@@ -39,7 +35,7 @@ from api_client import FormulaAPIClient
 from image_handler import ImageHandler
 from image_display_panel import ImageDisplayPanel  # 更新导入
 from api_and_recognition_panel import APIAndRecognitionPanel
-from api_config import TEST_CONFIG  # 测试配置 - 提交前记得删除！
+from api_config import TEST_CONFIG  # 测试配置 - 用于开发调试
 
 
 def create_temp_file(suffix='.png'):
@@ -119,8 +115,6 @@ class FormulaRecognizer(QMainWindow):
         # 定时器用于检测超时
         self.timeout_timer = None
         
-        # 启动时默认进入精简模式和置顶状态将在 showEvent 中处理
-        
     def _initialize_default_state(self):
         """延迟初始化默认状态（精简模式和置顶）"""
         # 确保窗口已经完全显示
@@ -183,9 +177,16 @@ class FormulaRecognizer(QMainWindow):
                 if not result:
                     raise ctypes.WinError()
                     
-            except Exception as e:
-                print(f"Windows API置顶失败: {e}")
-                # 不回退到窗口标志方式，避免任务栏图标消失
+            except Exception:
+                # Windows API置顶失败，尝试重试
+                retry_count = getattr(self, '_toggle_always_on_top_retry_count', 0)
+                if retry_count < 5:
+                    self._toggle_always_on_top_retry_count = retry_count + 1
+                    QTimer.singleShot(200, lambda: self.toggle_always_on_top(checked))
+                else:
+                    # 超过最大重试次数，清理计数器
+                    if hasattr(self, '_toggle_always_on_top_retry_count'):
+                        delattr(self, '_toggle_always_on_top_retry_count')
         else:
             # Windows平台重新设置应用程序ID以保护任务栏图标
             try:
@@ -705,9 +706,8 @@ class FormulaRecognizer(QMainWindow):
                         try:
                             mathml_formula = latex2mathml.converter.convert(latex_formula)
                             pyperclip.copy(mathml_formula)
-                        except Exception as e:
+                        except Exception:
                             # 如果转换失败，回退到LaTeX
-                            print(f"MathML转换失败: {e}，回退到LaTeX")
                             pyperclip.copy(latex_formula)
                     else:
                         # 如果没有latex2mathml库，只复制LaTeX
@@ -739,18 +739,12 @@ def main():
         window = FormulaRecognizer()
         window.show()
         sys.exit(app.exec())
-    except ImportError as e:
-        # 依赖错误仍然需要在控制台显示，因为此时 GUI 可能无法启动
-        print(f"缺少必要的依赖包: {e}")
-        print("请安装以下依赖:")
-        print("pip install PyQt6 requests pillow pyperclip")
-        sys.stdout.flush()
-    except Exception as e:
-        import traceback
-        print(f"程序启动失败: {e}")
-        print("详细错误信息:")
-        traceback.print_exc()
-        sys.stdout.flush()
+    except ImportError:
+        # 依赖错误，静默退出或可根据需要记录日志
+        sys.exit(1)
+    except Exception:
+        # 其他启动错误，静默退出
+        sys.exit(1)
 
 
 if __name__ == "__main__":

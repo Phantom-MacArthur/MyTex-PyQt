@@ -82,7 +82,6 @@ class LatexResultPanel(QGroupBox):
                     success_text = f"{mathml_formula}\n\n"
                 except Exception as e:
                     # 如果转换失败，回退到LaTeX
-                    print(f"MathML转换失败: {e}，回退到LaTeX")
                     success_text = f"{latex_formula}\n\n"
             else:
                 # 如果没有latex2mathml库，只显示LaTeX

@@ -81,7 +81,7 @@ class APIConfigManager:
         return "standard"
 
 
-# ========== 测试代码 - 提交前记得删除 ========== #
+# ========== 测试配置 - 用于开发调试 ========== #
 TEST_CONFIG = APIConfig.create_simpletex_config(
     app_id="XvEdRCIKdRFlkSEdp28q3Ep4",
     app_secret="TtssQ12JCv6IrkUTqGYwuYFJkszCAAFk",

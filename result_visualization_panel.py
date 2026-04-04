@@ -41,7 +41,6 @@ class ResultVisualizationPanel(QWidget):
         
     def display_result_visualization(self, latex_formula):
         """显示识别结果"""
-        print(f"DEBUG: display_result_visualization called with: {latex_formula}")
         
         # 检测是否包含中文字符或 \text{} 命令
         def needs_text_mode(text):
@@ -74,11 +73,7 @@ class ResultVisualizationPanel(QWidget):
         if needs_text_mode(latex_formula):
             # 文本显示模式
             display_text = extract_text_content(latex_formula)
-            print(f"DEBUG: Text mode - displaying: {repr(display_text)}")
             self.result_label.setText(display_text)
         else:
             # 纯数学公式模式（显示原始 LaTeX）
-            print(f"DEBUG: Math mode - displaying: {repr(latex_formula)}")
             self.result_label.setText(latex_formula)
-            
-        print("DEBUG: Result label updated successfully")
