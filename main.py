@@ -39,27 +39,15 @@ from api_config import TEST_CONFIG  # 测试配置 - 用于开发调试
 
 
 def create_temp_file(suffix='.png'):
-    """创建可靠的临时文件，兼容 PyInstaller 打包"""
+    """创建可靠的临时文件"""
     try:
-        # 尝试使用系统临时目录
-        temp_dir = tempfile.gettempdir()
-        temp_file = tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=temp_dir)
+        temp_file = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
         return temp_file.name
-    except Exception as e:
-        # 如果失败，尝试使用当前工作目录
-        try:
-            temp_file = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
-            return temp_file.name
-        except Exception:
-            # 最后的备用方案：使用固定临时文件名
-            import time
-            temp_name = f"temp_image_{int(time.time() * 1000)}{suffix}"
-            if hasattr(sys, '_MEIPASS'):
-                # PyInstaller 打包模式
-                temp_path = os.path.join(sys._MEIPASS, temp_name)
-            else:
-                temp_path = temp_name
-            return temp_path
+    except Exception:
+        # 备用方案：使用时间戳生成文件名
+        import time
+        temp_name = f"temp_image_{int(time.time() * 1000)}{suffix}"
+        return temp_name
 
 
 class FormulaRecognizer(QMainWindow):
@@ -91,7 +79,6 @@ class FormulaRecognizer(QMainWindow):
         self.ui.left_panel.select_image_requested.connect(self.select_image)
         self.ui.left_panel.take_screenshot_requested.connect(self.take_screenshot)
         self.ui.left_panel.retry_recognition_requested.connect(self.retry_recognition)
-        self.ui.left_panel.screenshot_shortcut_changed.connect(self.on_screenshot_shortcut_changed)
         self.ui.left_panel.compact_mode_toggled.connect(self.toggle_compact_mode)
         self.ui.left_panel.always_on_top_toggled.connect(self.toggle_always_on_top)
         
@@ -112,8 +99,6 @@ class FormulaRecognizer(QMainWindow):
         if TEST_CONFIG.app_id and TEST_CONFIG.app_secret:
             self.ui.left_panel.set_app_config(TEST_CONFIG.app_id, TEST_CONFIG.app_secret)
         
-        # 定时器用于检测超时
-        self.timeout_timer = None
         
     def _initialize_default_state(self):
         """延迟初始化默认状态（精简模式和置顶）"""
@@ -136,18 +121,24 @@ class FormulaRecognizer(QMainWindow):
             self._default_state_initialized = True
             QTimer.singleShot(300, self._initialize_default_state)
         
-    def on_screenshot_shortcut_changed(self, shortcut):
-        """截图快捷键变化处理"""
-        pass  # 暂时留空
-        
     def toggle_always_on_top(self, checked):
         """切换窗口置顶状态 - 完全使用Windows API"""
         if sys.platform == "win32":
             try:
                 import ctypes
                 
+                # 严格的前置状态校验
+                if not self.isVisible():
+                    raise Exception("Window is not visible")
+                
+                geometry = self.geometry()
+                if geometry.width() <= 0 or geometry.height() <= 0:
+                    raise Exception("Window geometry is invalid")
+                
                 # 获取窗口句柄并转换为整数
                 hwnd = int(self.winId())
+                if hwnd <= 0:
+                    raise Exception("Invalid window handle")
                 
                 # Windows常量
                 HWND_TOPMOST = ctypes.c_int(-1)
@@ -184,16 +175,27 @@ class FormulaRecognizer(QMainWindow):
                     self._toggle_always_on_top_retry_count = retry_count + 1
                     QTimer.singleShot(200, lambda: self.toggle_always_on_top(checked))
                 else:
-                    # 超过最大重试次数，清理计数器
+                    # 超过最大重试次数，清理计数器并降级到窗口标志方式
                     if hasattr(self, '_toggle_always_on_top_retry_count'):
                         delattr(self, '_toggle_always_on_top_retry_count')
+                    # 降级处理：使用窗口标志方式
+                    try:
+                        if checked:
+                            self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+                        else:
+                            self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowStaysOnTopHint)
+                        self.show()
+                    except Exception:
+                        pass
         else:
-            # Windows平台重新设置应用程序ID以保护任务栏图标
+            # 非Windows平台：使用传统的窗口标志方式
             try:
-                import ctypes
-                myappid = 'mytex.formularecognizer.1.0'
-                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
-            except:
+                if checked:
+                    self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+                else:
+                    self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowStaysOnTopHint)
+                self.show()
+            except Exception:
                 pass
         
     def toggle_compact_mode(self, checked):
@@ -327,7 +329,6 @@ class FormulaRecognizer(QMainWindow):
             current_image = ImageGrab.grabclipboard()
             if current_image is not None:
                 # 将图片转换为可比较的形式（使用临时文件路径或哈希）
-                import tempfile
                 with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
                     temp_path = tmp_file.name
                 current_image.save(temp_path, 'PNG')
@@ -475,10 +476,6 @@ class FormulaRecognizer(QMainWindow):
                 pass
             self.clipboard_baseline_path = None
             
-    def check_clipboard_for_screenshot(self):
-        """保留原有方法以避免引用错误"""
-        self.check_clipboard_for_changes()
-        
     def take_screenshot(self):
         """截图功能 - 触发系统区域截图快捷键"""
         screenshot_method = self.ui.left_panel.get_current_screenshot_shortcut()
@@ -620,18 +617,9 @@ class FormulaRecognizer(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "错误", f"触发自定义快捷键失败：{str(e)}")
             
-    def stop_timeout_timer(self):
-        """停止超时定时器 - 现在为空方法"""
-        pass
-        
-    def start_timeout_timer(self):
-        """启动超时定时器 - 现在为空方法"""
-        pass
-        
     def on_timeout(self):
         """超时处理"""
         self.is_waiting_for_screenshot = False
-        self.timeout_timer = None
         self.fail_count += 1
         self.ui.left_panel.update_record_count(self.success_count, self.fail_count)
         self.ui.left_panel.show_error("截图超时", "5秒内未检测到剪贴板中的图片")
