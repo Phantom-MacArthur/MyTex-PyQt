@@ -30,7 +30,6 @@ except ImportError:
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 sys.dont_write_bytecode = True
 
-from main_window import MainWindow
 from api_client import FormulaAPIClient
 from image_handler import ImageHandler
 from image_display_panel import ImageDisplayPanel  # 更新导入
@@ -53,26 +52,49 @@ def create_temp_file(suffix='.png'):
 class FormulaRecognizer(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.setWindowTitle("MyTex-PyQt - 公式识别工具")
         
-        # 设置窗口标题和初始大小 - 修改为宽600高500
-        self.setWindowTitle("公式识别软件")
-        self.resize(600, 500)  # 宽度600px，高度500px
-        self.setMinimumSize(600, 500)
-        
-        # Windows特定：设置应用程序ID以确保任务栏图标正常显示
+        # 设置应用程序用户模型ID（Windows任务栏图标分组）
         if sys.platform == "win32":
-            import ctypes
-            myappid = 'mytex.formularecognizer.1.0'  # 应用程序ID
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+            try:
+                import ctypes
+                myappid = 'mytex.pyqt.formula.recognizer'  # 应用程序ID
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+            except Exception:
+                pass
         
-        # 创建中心部件 - 使用标准窗口标志，不包含置顶标志
-        central_widget = MainWindow()
+        # 创建中央部件和布局
+        central_widget = QWidget()
         self.setCentralWidget(central_widget)
+        
+        main_layout = QHBoxLayout()
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
+        central_widget.setLayout(main_layout)
+        
+        # 创建左右面板
+        left_panel = APIAndRecognitionPanel()
+        right_panel = ImageDisplayPanel()
+        
+        # 固定左侧宽度为300px
+        left_panel.setFixedWidth(300)
+        
+        # 添加到布局
+        main_layout.addWidget(left_panel)
+        main_layout.addWidget(right_panel)
+        
+        # 设置拉伸因子
+        main_layout.setStretch(0, 0)  # 左侧不扩展
+        main_layout.setStretch(1, 1)  # 右侧可扩展
         
         # 初始化各个模块
         self.api_client = FormulaAPIClient()
         self.image_handler = ImageHandler(self)
         self.ui = central_widget
+        
+        # 为 ui 对象添加 left_panel 和 right_panel 属性，以便后续访问
+        self.ui.left_panel = left_panel
+        self.ui.right_panel = right_panel
         
         # 连接信号
         self.ui.right_panel.input_panel.original_view  # 确保右侧面板（图片显示）可用
@@ -90,6 +112,9 @@ class FormulaRecognizer(QMainWindow):
         self.ui.left_panel.update_record_count(self.success_count, self.fail_count)
         self.is_compact_mode = True  # 默认开启精简模式
         self.normal_window_size = self.size()  # 保存初始正常窗口大小
+        self._is_topmost = False  # 添加置顶状态跟踪
+        self._topmost_retry_count = 0  # 添加重试计数
+        self._max_topmost_retries = 5  # 最大重试次数
         
         # 绑定快捷键
         self.paste_shortcut = QShortcut(QKeySequence("Ctrl+V"), self)
@@ -122,81 +147,97 @@ class FormulaRecognizer(QMainWindow):
             QTimer.singleShot(300, self._initialize_default_state)
         
     def toggle_always_on_top(self, checked):
-        """切换窗口置顶状态 - 完全使用Windows API"""
+        """切换窗口置顶状态 - 完全使用Windows API并包含完整错误处理"""
         if sys.platform == "win32":
-            try:
-                import ctypes
-                
-                # 严格的前置状态校验
-                if not self.isVisible():
-                    raise Exception("Window is not visible")
-                
-                geometry = self.geometry()
-                if geometry.width() <= 0 or geometry.height() <= 0:
-                    raise Exception("Window geometry is invalid")
-                
-                # 获取窗口句柄并转换为整数
-                hwnd = int(self.winId())
-                if hwnd <= 0:
-                    raise Exception("Invalid window handle")
-                
-                # Windows常量
-                HWND_TOPMOST = ctypes.c_int(-1)
-                HWND_NOTOPMOST = ctypes.c_int(-2)
-                SWP_NOMOVE = 0x0002
-                SWP_NOSIZE = 0x0001
-                SWP_NOACTIVATE = 0x0010
-                SWP_ASYNCWINDOWPOS = 0x4000
-                
-                flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS
-                
-                if checked:
-                    result = ctypes.windll.user32.SetWindowPos(
-                        ctypes.c_void_p(hwnd), 
-                        HWND_TOPMOST, 
-                        0, 0, 0, 0, 
-                        flags
-                    )
-                else:
-                    result = ctypes.windll.user32.SetWindowPos(
-                        ctypes.c_void_p(hwnd), 
-                        HWND_NOTOPMOST, 
-                        0, 0, 0, 0, 
-                        flags
-                    )
-                    
-                if not result:
-                    raise ctypes.WinError()
-                    
-            except Exception:
-                # Windows API置顶失败，尝试重试
-                retry_count = getattr(self, '_toggle_always_on_top_retry_count', 0)
-                if retry_count < 5:
-                    self._toggle_always_on_top_retry_count = retry_count + 1
-                    QTimer.singleShot(200, lambda: self.toggle_always_on_top(checked))
-                else:
-                    # 超过最大重试次数，清理计数器并降级到窗口标志方式
-                    if hasattr(self, '_toggle_always_on_top_retry_count'):
-                        delattr(self, '_toggle_always_on_top_retry_count')
-                    # 降级处理：使用窗口标志方式
-                    try:
-                        if checked:
-                            self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
-                        else:
-                            self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowStaysOnTopHint)
-                        self.show()
-                    except Exception:
-                        pass
+            self._toggle_always_on_top_win32(checked)
         else:
-            # 非Windows平台：使用传统的窗口标志方式
-            try:
+            # 非Windows平台使用窗口标志
+            current_flags = self.windowFlags()
+            if not (current_flags & Qt.WindowType.Window):
+                current_flags |= Qt.WindowType.Window
+            if checked:
+                current_flags |= Qt.WindowType.WindowStaysOnTopHint
+            else:
+                current_flags &= ~Qt.WindowType.WindowStaysOnTopHint
+            self.setWindowFlags(current_flags)
+            self.show()
+            self._is_topmost = checked
+            # 同步按钮状态
+            if hasattr(self.ui, 'left_panel') and hasattr(self.ui.left_panel, 'buttons_panel'):
+                self.ui.left_panel.buttons_panel.always_on_top_btn.setChecked(checked)
+    
+    def _toggle_always_on_top_win32(self, checked):
+        """Windows 平台专用置顶实现"""
+        # 前置状态校验
+        if not self.isVisible():
+            QTimer.singleShot(200, lambda: self._toggle_always_on_top_win32(checked))
+            return
+            
+        geom = self.geometry()
+        if geom.width() <= 0 or geom.height() <= 0:
+            QTimer.singleShot(200, lambda: self._toggle_always_on_top_win32(checked))
+            return
+            
+        hwnd = int(self.winId())
+        if hwnd <= 0:
+            QTimer.singleShot(200, lambda: self._toggle_always_on_top_win32(checked))
+            return
+
+        # 调用 Windows API
+        try:
+            import ctypes
+            from ctypes import wintypes
+            
+            user32 = ctypes.windll.user32
+            HWND_TOPMOST = -1
+            HWND_NOTOPMOST = -2
+            SWP_NOMOVE = 0x0002
+            SWP_NOSIZE = 0x0001
+            SWP_NOACTIVATE = 0x0010
+            SWP_ASYNCWINDOWPOS = 0x4000
+            
+            flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS
+            
+            z_order = HWND_TOPMOST if checked else HWND_NOTOPMOST
+            result = user32.SetWindowPos(
+                wintypes.HWND(hwnd),
+                wintypes.HWND(z_order),
+                0, 0, 0, 0,
+                wintypes.UINT(flags)
+            )
+            
+            if result:
+                self._is_topmost = checked
+                self._topmost_retry_count = 0  # 重置重试计数
+                
+                # 同步按钮状态
+                if hasattr(self.ui, 'left_panel') and hasattr(self.ui.left_panel, 'buttons_panel'):
+                    self.ui.left_panel.buttons_panel.always_on_top_btn.setChecked(checked)
+            else:
+                raise ctypes.WinError()
+                
+        except Exception as e:
+            # 降级处理：回退到窗口标志方式
+            if self._topmost_retry_count < self._max_topmost_retries:
+                self._topmost_retry_count += 1
+                QTimer.singleShot(200, lambda: self._toggle_always_on_top_win32(checked))
+            else:
+                # 最终降级
+                current_flags = self.windowFlags()
+                if not (current_flags & Qt.WindowType.Window):
+                    current_flags |= Qt.WindowType.Window
                 if checked:
-                    self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+                    current_flags |= Qt.WindowType.WindowStaysOnTopHint
                 else:
-                    self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowStaysOnTopHint)
+                    current_flags &= ~Qt.WindowType.WindowStaysOnTopHint
+                self.setWindowFlags(current_flags)
                 self.show()
-            except Exception:
-                pass
+                self._is_topmost = checked
+                self._topmost_retry_count = 0
+                
+                # 同步按钮状态
+                if hasattr(self.ui, 'left_panel') and hasattr(self.ui.left_panel, 'buttons_panel'):
+                    self.ui.left_panel.buttons_panel.always_on_top_btn.setChecked(checked)
         
     def toggle_compact_mode(self, checked):
         """切换精简模式 - 只显示图片识别框"""
@@ -727,11 +768,15 @@ def main():
         window = FormulaRecognizer()
         window.show()
         sys.exit(app.exec())
-    except ImportError:
-        # 依赖错误，静默退出或可根据需要记录日志
+    except ImportError as e:
+        # 依赖错误，显示具体错误信息
+        print(f"Import error: {e}")
         sys.exit(1)
-    except Exception:
-        # 其他启动错误，静默退出
+    except Exception as e:
+        # 其他启动错误，显示具体错误信息
+        print(f"Startup error: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
 

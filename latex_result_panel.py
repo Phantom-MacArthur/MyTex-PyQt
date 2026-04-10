@@ -81,11 +81,11 @@ class LatexResultPanel(QGroupBox):
                     mathml_formula = latex2mathml.converter.convert(latex_formula)
                     success_text = f"{mathml_formula}\n\n"
                 except Exception as e:
-                    # 如果转换失败，回退到LaTeX
-                    success_text = f"{latex_formula}\n\n"
+                    # 如果转换失败，显示错误信息和原始LaTeX
+                    success_text = f"⚠️ MathML转换失败: {str(e)}\n\n原始LaTeX公式:\n{latex_formula}\n\n"
             else:
-                # 如果没有latex2mathml库，只显示LaTeX
-                success_text = f"{latex_formula}\n\n"
+                # 如果没有latex2mathml库，显示提示信息和LaTeX
+                success_text = f"⚠️ 未安装latex2mathml库，无法转换为MathML\n\nLaTeX公式:\n{latex_formula}\n\n"
             self.result_text.setPlainText(current_text + success_text)
         else:
             import json
